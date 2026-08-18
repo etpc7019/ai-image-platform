@@ -1,0 +1,71 @@
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+const path = require('path');
+
+const app = express();
+
+// ⚠️ 关键配置：这行代码让平台在云端也能正常运行
+const PORT = process.env.PORT || 3000;
+
+// ⚠️ API Key 配置：优先使用云端环境变量，如果没有则使用下面的默认值
+const API_KEY = process.env.OPENWOND_API_KEY || 'sk-open-a94a155c7e8e40118239ec0461f7480fca52b696aef245fda9127f5274e7847b';
+const MODEL_NAME = 'Nano Banana Pro';
+const API_URL = 'https://image.openwond.com/v1/draw';
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+let imageHistory = [];
+
+// 生图接口
+app.post('/api/generate', async (req, res) => {
+    const { prompt } = req.body;
+    if (!prompt) return res.status(400).json({ error: '请输入提示词' });
+
+    try {
+        console.log(`正在请求生图: ${prompt}`);
+        const response = await axios.post(API_URL, {
+            model: MODEL_NAME,
+            prompt: prompt,
+            size: "auto",
+            images: [],
+            resolution: "1K"
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            }
+        });
+
+        const responseData = response.data;
+        // 兼容多种可能的图片返回格式
+        let imageUrl = (responseData.data && responseData.data[0] && responseData.data[0].url) || 
+                       responseData.image_url || 
+                       (responseData.images && responseData.images[0]);
+
+        if (!imageUrl) {
+            console.error("解析失败:", responseData);
+            return res.status(500).json({ error: '图片地址解析失败' });
+        }
+
+        // 记录历史
+        imageHistory.unshift({ id: Date.now(), prompt, imageUrl, createdAt: new Date().toLocaleString() });
+        res.json({ success: true, imageUrl: imageUrl });
+
+    } catch (error) {
+        console.error('生图错误:', error.message);
+        res.status(500).json({ error: '生图服务出错', details: error.message });
+    }
+});
+
+// 历史记录接口
+app.get('/api/history', (req, res) => {
+    res.json(imageHistory);
+});
+
+// 启动服务
+app.listen(PORT, () => {
+    console.log(`✅ 服务已启动，访问端口: ${PORT}`);
+});

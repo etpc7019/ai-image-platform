@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 生图平台</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f4f4f9; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #2c3e50; }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; }
+        textarea { width: 100%; height: 100px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background-color: #3498db; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
+        .result-area { margin-top: 30px; text-align: center; min-height: 200px; border-top: 1px solid #eee; padding-top: 20px;}
+        .result-area img { max-width: 100%; border-radius: 8px; }
+        .loading { color: #7f8c8d; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🎨 AI 生图平台</h1>
+    <div class="input-group">
+        <label for="prompt">画面描述</label>
+        <textarea id="prompt" placeholder="例如：一只穿着宇航服的猫..."></textarea>
+    </div>
+    <button id="generate-btn" onclick="generateImage()">✨ 开始生成</button>
+    <div class="result-area" id="result-area">
+        <p class="loading" id="loading-msg" style="display: none;">正在生成中...</p>
+        <img id="result-image" style="display: none;" src="" alt="生成的图片">
+    </div>
+</div>
+<script>
+    async function generateImage() {
+        const prompt = document.getElementById('prompt').value.trim();
+        if (!prompt) return alert('请输入描述');
+        
+        const btn = document.getElementById('generate-btn');
+        const loading = document.getElementById('loading-msg');
+        const img = document.getElementById('result-image');
+        
+        btn.disabled = true; btn.innerText = '生成中...';
+        loading.style.display = 'block'; img.style.display = 'none';
+
+        try {
+            const res = await fetch('/api/generate', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt })
+            });
+            const data = await res.json();
+            if (data.success) {
+                img.src = data.imageUrl; img.style.display = 'block';
+            } else { alert('失败: ' + data.error); }
+        } catch (e) { alert('请求错误'); }
+        finally {
+            btn.disabled = false; btn.innerText = '✨ 开始生成';
+            loading.style.display = 'none';
+        }
+    }
+</script>
+</body>
+</html>
