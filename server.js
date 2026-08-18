@@ -41,25 +41,22 @@ app.post('/api/generate', async (req, res) => {
 
         const responseData = response.data;
         
-        // ✨ 先打印完整的响应，帮助我们调试
-        console.log("完整的API响应:", JSON.stringify(responseData, null, 2));
-        
-        // ✨ 更健壮的解析逻辑
+        // ✨ 更健壮的解析逻辑，处理双引号JSON
         let imageUrl;
         if (responseData && typeof responseData === 'object') {
-            // 优先检查 url 字段
+            // 检查 url 字段（双引号格式）
             if (responseData.url && typeof responseData.url === 'string') {
                 imageUrl = responseData.url;
             } 
-            // 其次检查 data 数组中的 url
+            // 检查 data 数组中的 url
             else if (responseData.data && Array.isArray(responseData.data) && responseData.data[0] && responseData.data[0].url) {
                 imageUrl = responseData.data[0].url;
             }
-            // 再检查 image_url 字段
+            // 检查 image_url 字段
             else if (responseData.image_url && typeof responseData.image_url === 'string') {
                 imageUrl = responseData.image_url;
             }
-            // 最后检查 images 数组
+            // 检查 images 数组
             else if (responseData.images && Array.isArray(responseData.images) && responseData.images[0]) {
                 imageUrl = responseData.images[0];
             }
@@ -79,6 +76,7 @@ app.post('/api/generate', async (req, res) => {
         res.status(500).json({ error: '生图服务出错', details: error.message });
     }
 });
+
 
 
    
