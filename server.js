@@ -41,10 +41,10 @@ app.post('/api/generate', async (req, res) => {
 
         const responseData = response.data;
         
-        // ✨ 更健壮的解析逻辑，处理双引号JSON
+        // ✨ 更健壮的解析逻辑，处理单引号JSON
         let imageUrl;
         if (responseData && typeof responseData === 'object') {
-            // 检查 url 字段（双引号格式）
+            // 检查 url 字段（单引号格式）
             if (responseData.url && typeof responseData.url === 'string') {
                 imageUrl = responseData.url;
             } 
@@ -76,6 +76,7 @@ app.post('/api/generate', async (req, res) => {
         res.status(500).json({ error: '生图服务出错', details: error.message });
     }
 });
+
 
 
 
