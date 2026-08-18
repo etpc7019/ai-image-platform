@@ -19,7 +19,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 let imageHistory = [];
 
-   // 生图接口
+    // 生图接口
    app.post('/api/generate', async (req, res) => {
        const { prompt } = req.body;
        if (!prompt) return res.status(400).json({ error: '请输入提示词' });
@@ -60,6 +60,7 @@ let imageHistory = [];
            res.status(500).json({ error: '生图服务出错', details: error.message });
        }
    });
+   
    
 
 // 启动服务
