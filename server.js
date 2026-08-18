@@ -51,24 +51,32 @@ app.post('/api/generate', async (req, res) => {
             }
         }
 
-        // ✨ 更健壮的解析逻辑
+        // ✨ 更健壮的解析逻辑，覆盖所有可能的url字段位置
         let imageUrl;
         if (responseData && typeof responseData === 'object') {
-            // 检查 url 字段
+            // 检查直接url字段（优先级最高）
             if (responseData.url && typeof responseData.url === 'string') {
                 imageUrl = responseData.url;
             } 
-            // 检查 data 数组中的 url
+            // 检查data对象中的url（data可能是对象）
+            else if (responseData.data && typeof responseData.data === 'object' && responseData.data.url) {
+                imageUrl = responseData.data.url;
+            }
+            // 检查data数组中的url（data可能是数组）
             else if (responseData.data && Array.isArray(responseData.data) && responseData.data[0] && responseData.data[0].url) {
                 imageUrl = responseData.data[0].url;
             }
-            // 检查 image_url 字段
+            // 检查image_url字段
             else if (responseData.image_url && typeof responseData.image_url === 'string') {
                 imageUrl = responseData.image_url;
             }
-            // 检查 images 数组
+            // 检查images数组（可能是数组形式）
             else if (responseData.images && Array.isArray(responseData.images) && responseData.images[0]) {
                 imageUrl = responseData.images[0];
+            }
+            // 检查result字段（某些API可能使用此字段）
+            else if (responseData.result && typeof responseData.result === 'string') {
+                imageUrl = responseData.result;
             }
         }
 
