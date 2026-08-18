@@ -39,12 +39,22 @@ app.post('/api/generate', async (req, res) => {
             }
         });
 
-        const responseData = response.data;
+        let responseData = response.data;
         
-        // ✨ 更健壮的解析逻辑，处理单引号JSON
+        // ✨ 确保responseData是对象，如果不是，尝试解析为JSON
+        if (typeof responseData === 'string') {
+            try {
+                responseData = JSON.parse(responseData);
+            } catch (e) {
+                console.error("无法将响应解析为JSON:", e.message);
+                return res.status(500).json({ error: '响应格式错误' });
+            }
+        }
+
+        // ✨ 更健壮的解析逻辑
         let imageUrl;
         if (responseData && typeof responseData === 'object') {
-            // 检查 url 字段（单引号格式）
+            // 检查 url 字段
             if (responseData.url && typeof responseData.url === 'string') {
                 imageUrl = responseData.url;
             } 
@@ -75,13 +85,7 @@ app.post('/api/generate', async (req, res) => {
         console.error('生图错误:', error.message);
         res.status(500).json({ error: '生图服务出错', details: error.message });
     }
-});
-
-
-
-
-   
-   
+});   
 
 // 启动服务
 app.listen(PORT, () => {
