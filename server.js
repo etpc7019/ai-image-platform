@@ -1,75 +1,130 @@
 const express = require('express');
 const axios = require('axios');
-const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 
 // ⚠️ 关键配置：这行代码让平台在云端也能正常运行
 const PORT = process.env.PORT || 3000;
 
-// ⚠️ API Key 配置：优先使用云端环境变量，如果没有则使用下面的默认值
-const API_KEY = process.env.OPENWOND_API_KEY || 'sk-open-a94a155c7e8e40118239ec0461f7480fca52b696aef245fda9127f5274e7847b';
+const API_KEY = process.env.OPENWOND_API_KEY;
 const MODEL_NAME = 'Nano Banana Pro';
 const API_URL = 'https://image.openwond.com/v1/draw';
-const CLIENT_API_KEY = process.env.GENERATE_API_KEY;
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
 const REQUEST_WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 5;
+const MAX_LOGIN_ATTEMPTS_PER_WINDOW = 10;
 const UPSTREAM_TIMEOUT_MS = 60 * 1000;
 const MAX_PROMPT_LENGTH = 2_000;
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const APP_PASSWORD = process.env.APP_PASSWORD;
+const SESSION_SECRET = process.env.SESSION_SECRET;
+const TRUST_PROXY_HOPS = process.env.TRUST_PROXY_HOPS;
 
-if (!CLIENT_API_KEY) {
-    throw new Error('GENERATE_API_KEY must be configured');
+if (!API_KEY || !APP_PASSWORD || !SESSION_SECRET) {
+    throw new Error('OPENWOND_API_KEY, APP_PASSWORD, and SESSION_SECRET must be configured');
 }
 
-app.use(cors({
-    origin(origin, callback) {
-        // Requests without an Origin header are same-origin or non-browser clients.
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-        return callback(new Error('Origin not allowed by CORS'));
-    }
-}));
+if (TRUST_PROXY_HOPS !== undefined) {
+    if (!/^\d+$/.test(TRUST_PROXY_HOPS)) throw new Error('TRUST_PROXY_HOPS must be a non-negative integer');
+    app.set('trust proxy', Number(TRUST_PROXY_HOPS));
+}
+
 app.use(express.json({ limit: '10kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-const requestCounts = new Map();
+const rateLimitEntries = new Map();
 let lastRateLimitCleanupAt = 0;
 
-function protectGenerateEndpoint(req, res, next) {
-    if (req.get('X-API-Key') !== CLIENT_API_KEY) {
-        return res.status(401).json({ error: '未授权' });
-    }
-
-    const now = Date.now();
-    if (now - lastRateLimitCleanupAt >= REQUEST_WINDOW_MS) {
-        for (const [ip, record] of requestCounts) {
-            if (now - record.windowStartedAt >= REQUEST_WINDOW_MS) requestCounts.delete(ip);
+function rateLimit(namespace, maximumRequests) {
+    return (req, res, next) => {
+        const now = Date.now();
+        if (now - lastRateLimitCleanupAt >= REQUEST_WINDOW_MS) {
+            for (const [key, record] of rateLimitEntries) {
+                if (now - record.windowStartedAt >= REQUEST_WINDOW_MS) rateLimitEntries.delete(key);
+            }
+            lastRateLimitCleanupAt = now;
         }
-        lastRateLimitCleanupAt = now;
-    }
-    const clientId = req.ip;
-    const entry = requestCounts.get(clientId);
-    const recentRequests = !entry || now - entry.windowStartedAt >= REQUEST_WINDOW_MS
-        ? { windowStartedAt: now, count: 0 }
-        : entry;
+        const key = `${namespace}:${req.ip}`;
+        const entry = rateLimitEntries.get(key);
+        const recentRequests = !entry || now - entry.windowStartedAt >= REQUEST_WINDOW_MS
+            ? { windowStartedAt: now, count: 0 }
+            : entry;
 
-    if (recentRequests.count >= MAX_REQUESTS_PER_WINDOW) {
-        const retryAfterSeconds = Math.ceil((REQUEST_WINDOW_MS - (now - recentRequests.windowStartedAt)) / 1000);
-        res.set('Retry-After', String(retryAfterSeconds));
-        return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
-    }
+        if (recentRequests.count >= maximumRequests) {
+            const retryAfterSeconds = Math.ceil((REQUEST_WINDOW_MS - (now - recentRequests.windowStartedAt)) / 1000);
+            res.set('Retry-After', String(retryAfterSeconds));
+            return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+        }
 
-    recentRequests.count += 1;
-    requestCounts.set(clientId, recentRequests);
+        recentRequests.count += 1;
+        rateLimitEntries.set(key, recentRequests);
+        return next();
+    };
+}
+
+function constantTimeEquals(value, expected) {
+    const valueBuffer = Buffer.from(value || '');
+    const expectedBuffer = Buffer.from(expected);
+    return valueBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(valueBuffer, expectedBuffer);
+}
+
+function getCookie(req, name) {
+    const prefix = `${name}=`;
+    const value = (req.headers.cookie || '').split(';').map((cookie) => cookie.trim()).find((cookie) => cookie.startsWith(prefix));
+    try {
+        return value ? decodeURIComponent(value.slice(prefix.length)) : null;
+    } catch {
+        return null;
+    }
+}
+
+function createSessionToken() {
+    const payload = Buffer.from(JSON.stringify({ expiresAt: Date.now() + SESSION_TTL_MS })).toString('base64url');
+    const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+    return `${payload}.${signature}`;
+}
+
+function hasValidSession(req) {
+    const token = getCookie(req, 'session');
+    if (!token) return false;
+    const [payload, signature, extra] = token.split('.');
+    if (!payload || !signature || extra) return false;
+
+    const expectedSignature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+    if (!constantTimeEquals(signature, expectedSignature)) return false;
+
+    try {
+        const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+        return Number.isFinite(session.expiresAt) && session.expiresAt > Date.now();
+    } catch {
+        return false;
+    }
+}
+
+function requireSession(req, res, next) {
+    if (!hasValidSession(req)) return res.status(401).json({ error: '请先登录' });
     return next();
 }
 
+app.post('/api/session', rateLimit('login', MAX_LOGIN_ATTEMPTS_PER_WINDOW), (req, res) => {
+    const { password } = req.body || {};
+    if (typeof password !== 'string' || !constantTimeEquals(password, APP_PASSWORD)) {
+        return res.status(401).json({ error: '密码错误' });
+    }
+
+    res.cookie('session', createSessionToken(), {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: SESSION_TTL_MS,
+        path: '/'
+    });
+    return res.status(204).end();
+});
+
  // 生图接口
-app.post('/api/generate', protectGenerateEndpoint, async (req, res) => {
+app.post('/api/generate', requireSession, rateLimit('generate', MAX_REQUESTS_PER_WINDOW), async (req, res) => {
     const { prompt } = req.body || {};
     if (typeof prompt !== 'string' || !prompt.trim()) {
         return res.status(400).json({ error: '请输入提示词' });
